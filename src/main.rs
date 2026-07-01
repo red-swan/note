@@ -120,6 +120,25 @@ fn print_conflict_diff(local_path: &PathBuf, remote_path: &PathBuf) {
     }
 }
 
+fn push_with_conflict_check(cfg: &mut Config, s3_path: &str, pre_last_modified: &Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let pre_push_last_modified = head_object_last_modified(s3_path)?;
+    if &pre_push_last_modified != pre_last_modified {
+        s3_pull(s3_path, &conflict_file())?;
+        println!("Remote changed since last sync. Not pushed.");
+        println!("Your local copy is at {:?}", notes_file());
+        println!("The remote copy is at {:?}", conflict_file());
+        print_conflict_diff(&notes_file(), &conflict_file());
+        println!("Resolve manually, then run: note push --force");
+        return Ok(());
+    }
+
+    s3_push(&notes_file(), s3_path)?;
+    let new_last_modified = head_object_last_modified(s3_path)?;
+    cfg.last_synced = new_last_modified;
+    write_config(cfg)?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() == 1 {
@@ -153,6 +172,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.len() == 2 && args[1] == "push" {
+        let pre_push_last_modified = sync_if_stale(&cfg, &s3_path)?;
+        push_with_conflict_check(&mut cfg, &s3_path, &pre_push_last_modified)?;
+        return Ok(());
+    }
+
     let pre_append_last_modified = sync_if_stale(&cfg, &s3_path)?;
 
     let arg_line = args[1..].join(" ");
@@ -160,21 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(&mut f, "{}", arg_line)?;
     drop(f);
 
-    let pre_push_last_modified = head_object_last_modified(&s3_path)?;
-    if pre_push_last_modified != pre_append_last_modified {
-        s3_pull(&s3_path, &conflict_file())?;
-        println!("Remote changed while writing this note. Not pushed.");
-        println!("Your local copy (with the new note) is at {:?}", notes_file());
-        println!("The remote copy is at {:?}", conflict_file());
-        print_conflict_diff(&notes_file(), &conflict_file());
-        println!("Resolve manually, then run: note push --force");
-        return Ok(());
-    }
-
-    s3_push(&notes_file(), &s3_path)?;
-    let new_last_modified = head_object_last_modified(&s3_path)?;
-    cfg.last_synced = new_last_modified;
-    write_config(&cfg)?;
+    push_with_conflict_check(&mut cfg, &s3_path, &pre_append_last_modified)?;
 
     Ok(())
 }

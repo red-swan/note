@@ -27,6 +27,7 @@ Requires the `aws` CLI installed and authenticated (e.g. via `aws configure` or 
 ```
 note <text>          # append a note (syncs with S3 first if remote changed)
 note open            # sync, then open the notes file
+note push            # sync + push local notes file as-is, no note added (e.g. after hand-editing)
 note push --force    # force-push local notes file, skipping pull/conflict check
 ```
 

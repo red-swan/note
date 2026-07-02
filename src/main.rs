@@ -3,11 +3,11 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use opener::open;
 
 struct Config {
     s3_path: Option<String>,
     last_synced: Option<String>,
+    editor: Option<String>,
 }
 
 fn config_dir() -> PathBuf {
@@ -27,13 +27,14 @@ fn conflict_file() -> PathBuf {
 }
 
 fn read_config() -> Config {
-    let mut cfg = Config { s3_path: None, last_synced: None };
+    let mut cfg = Config { s3_path: None, last_synced: None, editor: None };
     if let Ok(contents) = fs::read_to_string(config_file()) {
         for line in contents.lines() {
             if let Some((key, value)) = line.split_once('=') {
                 match key {
                     "s3_path" => cfg.s3_path = Some(value.to_string()),
                     "last_synced" => cfg.last_synced = Some(value.to_string()),
+                    "editor" => cfg.editor = Some(value.to_string()),
                     _ => {}
                 }
             }
@@ -50,6 +51,9 @@ fn write_config(cfg: &Config) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(last_synced) = &cfg.last_synced {
         contents.push_str(&format!("last_synced={}\n", last_synced));
+    }
+    if let Some(editor) = &cfg.editor {
+        contents.push_str(&format!("editor={}\n", editor));
     }
     fs::write(config_file(), contents)?;
     Ok(())
@@ -77,6 +81,9 @@ fn head_object_last_modified(s3_path: &str) -> Result<Option<String>, Box<dyn st
 }
 
 fn s3_pull(s3_path: &str, local_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = local_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let status = Command::new("aws")
         .args(["s3", "cp", s3_path, local_path.to_str().unwrap()])
         .status()?;
@@ -159,7 +166,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.len() == 2 && args[1] == "open" {
         sync_if_stale(&cfg, &s3_path)?;
-        open(&notes_file())?;
+        if let Some(editor) = &cfg.editor {
+            #[cfg(target_os = "macos")]
+            Command::new("open").args(["-a", editor, notes_file().to_str().unwrap()]).status()?;
+            #[cfg(not(target_os = "macos"))]
+            Command::new(editor).arg(notes_file().to_str().unwrap()).status()?;
+        } else if env::var("EDITOR").is_ok() {
+            let editor = env::var("EDITOR").unwrap();
+            Command::new(&editor).arg(notes_file().to_str().unwrap()).status()?;
+        } else {
+            #[cfg(target_os = "macos")]
+            Command::new("open").args(["-t", notes_file().to_str().unwrap()]).status()?;
+            #[cfg(target_os = "linux")]
+            Command::new("xdg-open").arg(notes_file().to_str().unwrap()).status()?;
+        }
         return Ok(());
     }
 

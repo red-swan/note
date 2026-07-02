@@ -152,12 +152,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Did not specify a note!".into());
     }
 
-    if args.len() == 3 && args[1] == "config" {
+    if args.len() >= 3 && args[1] == "config" {
         let mut cfg = read_config();
-        cfg.s3_path = Some(args[2].clone());
-        cfg.last_synced = None;
-        write_config(&cfg)?;
-        println!("Configured s3 path: {}", args[2]);
+        if args[2].starts_with("s3://") {
+            cfg.s3_path = Some(args[2].clone());
+            cfg.last_synced = None;
+            write_config(&cfg)?;
+            println!("Configured s3 path: {}", args[2]);
+        } else if args.len() == 4 && args[2] == "editor" {
+            cfg.editor = Some(args[3].clone());
+            write_config(&cfg)?;
+            println!("Configured editor: {}", args[3]);
+        } else {
+            return Err("Usage: note config s3://bucket/path/notes.temp | note config editor <name>".into());
+        }
         return Ok(());
     }
 
@@ -168,17 +176,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sync_if_stale(&cfg, &s3_path)?;
         if let Some(editor) = &cfg.editor {
             #[cfg(target_os = "macos")]
-            Command::new("open").args(["-a", editor, notes_file().to_str().unwrap()]).status()?;
+            Command::new("open").args(["-a", editor, notes_file().to_str().unwrap()]).spawn()?;
             #[cfg(not(target_os = "macos"))]
-            Command::new(editor).arg(notes_file().to_str().unwrap()).status()?;
+            Command::new(editor).arg(notes_file().to_str().unwrap()).spawn()?;
         } else if env::var("EDITOR").is_ok() {
             let editor = env::var("EDITOR").unwrap();
-            Command::new(&editor).arg(notes_file().to_str().unwrap()).status()?;
+            Command::new(&editor).arg(notes_file().to_str().unwrap()).spawn()?;
         } else {
             #[cfg(target_os = "macos")]
-            Command::new("open").args(["-t", notes_file().to_str().unwrap()]).status()?;
+            Command::new("open").args(["-t", notes_file().to_str().unwrap()]).spawn()?;
             #[cfg(target_os = "linux")]
-            Command::new("xdg-open").arg(notes_file().to_str().unwrap()).status()?;
+            Command::new("xdg-open").arg(notes_file().to_str().unwrap()).spawn()?;
         }
         return Ok(());
     }
